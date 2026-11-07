@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>24点游戏</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:"Microsoft YaHei",sans-serif}
+body{background:#2d2d30;color:#fff;display:flex;flex-direction:column;align-items:center;padding-top:120px}
+#msg{font-size:24px;margin-bottom:40px;width:700px}
+.numContainer{display:flex;gap:30px;margin-bottom:40px}
+.numBlock{width:100px;height:100px;background:#46465a;border:2px solid #fff;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:36px;cursor:pointer}
+.numBlock.selected{background:#5078c8}
+.btnRow{display:flex;gap:20px}
+button{width:80px;height:60px;font-size:28px;cursor:pointer;background:#646478;color:#fff;border:2px solid #fff;border-radius:4px}
+#btnNext{width:140px}
+#btnUndo{width:140px;background:#884444;}
+</style>
+</head>
+<body>
+<div id="msg">请点击两个数字，再点运算符</div>
+<div class="numContainer" id="numBoxWrap"></div>
+<div class="btnRow">
+<button id="btnAdd">+</button>
+<button id="btnSub">-</button>
+<button id="btnMul">*</button>
+<button id="btnDiv">/</button>
+<button id="btnUndo">撤销</button>
+<button id="btnNext">下一题</button>
+</div>
+
+<script>
+const eps = 1e-6;
+let nums = [];
+let select1 = -1, select2 = -1;
+let history = []; // 历史记录栈，用于撤销
+let msgEl = document.getElementById("msg");
+let numWrap = document.getElementById("numBoxWrap");
+
+// 24点核心判断
+function canMake24(arr) {
+    let n = arr.length;
+    if(n === 1) return Math.abs(arr[0] - 24.0) < eps;
+    for(let i=0;i<n;i++){
+        for(let j=0;j<n;j++){
+            if(i===j) continue;
+            let next = [];
+            for(let k=0;k<n;k++){
+                if(k!==i && k!==j) next.push(arr[k]);
+            }
+            let a = arr[i], b = arr[j];
+            next.push(a+b); if(canMake24(next)) return true; next.pop();
+            next.push(a-b); if(canMake24(next)) return true; next.pop();
+            next.push(a*b); if(canMake24(next)) return true; next.pop();
+            if(Math.abs(b) > eps){
+                next.push(a/b); if(canMake24(next)) return true; next.pop();
+            }
+        }
+    }
+    return false;
+}
+
+// 生成合法题目
+function generateGame(){
+    for(let t=0;t<200;t++){
+        let res = [];
+        for(let i=0;i<4;i++) res.push(Math.floor(Math.random()*13)+1);
+        if(canMake24(res)) return res;
+    }
+    return [6,9,2,4];
+}
+
+// 格式化数字输出
+function double2Str(val){
+    if(Math.abs(val - Math.round(val)) < eps) return val.toFixed(0);
+    else return val.toFixed(2);
+}
+
+// 保存当前状态到历史
+function saveState(){
+    history.push({
+        nums: [...nums],
+        select1: select1,
+        select2: select2
+    });
+}
+
+// 撤销
+function undo(){
+    if(history.length === 0){
+        setMsg("⚠ 没有可以撤销的步骤！");
+        return;
+    }
+    let state = history.pop();
+    nums = state.nums;
+    select1 = state.select1;
+    select2 = state.select2;
+    setMsg("✅ 已撤销上一步");
+    renderNums();
+}
+
+// 渲染数字方块
+function renderNums(){
+    numWrap.innerHTML = "";
+    for(let i=0;i<nums.length;i++){
+        let div = document.createElement("div");
+        div.className = "numBlock";
+        if(i === select1 || i === select2) div.classList.add("selected");
+        div.innerText = double2Str(nums[i]);
+        div.onclick = ()=>{
+            if(select1 === -1){
+                select1 = i;
+                setMsg("已选数字，请选择第二个数字");
+            }else if(select2 === -1 && i !== select1){
+                select2 = i;
+                setMsg("已选两个数字，请点运算符");
+            }else{
+                select1 = i;
+                select2 = -1;
+                setMsg("已选数字，请选择第二个数字");
+            }
+            renderNums();
+        }
+        numWrap.appendChild(div);
+    }
+}
+
+function setMsg(text){
+    msgEl.innerText = text;
+}
+
+// 运算逻辑
+function calc(op){
+    if(select1 === -1 || select2 === -1){
+        setMsg("⚠ 请先点选两个不同数字！");
+        return;
+    }
+    // 运算前先存档
+    saveState();
+
+    let a = nums[select1];
+    let b = nums[select2];
+    let res = 0;
+    let ok = true;
+    if(op === "+") res = a + b;
+    else if(op === "-") res = a - b;
+    else if(op === "*") res = a * b;
+    else if(op === "/"){
+        if(Math.abs(b) < eps){
+            setMsg("❌ 不能除以0！");
+            select1 = -1; select2 = -1;
+            renderNums();
+            return;
+        }
+        res = a / b;
+    }
+    let i1 = select1, i2 = select2;
+    if(i1 > i2) [i1,i2] = [i2,i1];
+    nums.splice(i2,1);
+    nums.splice(i1,1);
+    nums.push(res);
+    select1 = -1;
+    select2 = -1;
+    setMsg("执行运算");
+    if(nums.length === 1){
+        if(Math.abs(nums[0]-24) < eps){
+            setMsg("✅ 恭喜！算出24！点击【下一题】继续");
+        }else{
+            setMsg("❌ 失败！点【下一题】重来");
+        }
+    }
+    renderNums();
+}
+
+// 下一题（清空历史栈）
+function newQuestion(){
+    let cards = generateGame();
+    nums = [...cards];
+    select1 = -1; select2 = -1;
+    history = []; //换新题目，撤销记录清空
+    setMsg("新题目！点击两个数字，再点运算符");
+    renderNums();
+}
+
+// 绑定按钮
+document.getElementById("btnAdd").onclick = ()=>calc("+");
+document.getElementById("btnSub").onclick = ()=>calc("-");
+document.getElementById("btnMul").onclick = ()=>calc("*");
+document.getElementById("btnDiv").onclick = ()=>calc("/");
+document.getElementById("btnUndo").onclick = undo;
+document.getElementById("btnNext").onclick = newQuestion;
+
+// 初始化
+newQuestion();
+</script>
+</body>
+</html>

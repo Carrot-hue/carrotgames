@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>推箱子双人小游戏</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:"Microsoft YaHei",sans-serif}
+body{background:#111;color:#fff;padding:16px;display:flex;flex-direction:column;align-items:center}
+#gameCanvas{background:#222;border:2px solid #888}
+#info{margin-bottom:10px;font-size:18px;text-align:center;line-height:1.5}
+#tip{margin-top:10px;color:#aaa;text-align:center;line-height:1.6;max-width:700px}
+</style>
+</head>
+<body>
+<div id="info"></div>
+<canvas id="gameCanvas"></canvas>
+<div id="tip">
+【入】WASD移动 Z拆墙(仅1次)｜【人】方向键移动 L拆墙(仅1次)<br>
+规则：箱子推到出口相邻四格即可胜利通关；猫狗AI可推箱子和人物；ESC退出
+</div>
+
+<script>
+const GROUND_W1 = 31;
+const GROUND_H1 = 16;
+const BLOCK_SIZE = 20;
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+canvas.width = GROUND_W1 * BLOCK_SIZE;
+canvas.height = GROUND_H1 * BLOCK_SIZE;
+
+let ground1 = Array.from({length:GROUND_W1},()=>Array(GROUND_H1).fill(0));
+let p1x, p1y;   //玩家1：入 WASD
+let p2x, p2y;   //玩家2：人 方向键
+let catX, catY;
+let dogX, dogY;
+let box = [[0,0],[0,0],[0,0],[0,0]];
+let ex, ey;
+let level;
+let score1, score2;
+let isWin;
+let alreadyWin;
+let p1CanBreak = true;
+let p2CanBreak = true;
+let aiTimer = Date.now();
+
+function findBox(x,y){
+    for(let i=0;i<4;i++){
+        if(box[i][0]===x && box[i][1]===y) return i;
+    }
+    return -1;
+}
+function hasEntity(x,y){
+    if(x===p1x && y===p1y) return true;
+    if(x===p2x && y===p2y) return true;
+    if(x===catX && y===catY) return true;
+    if(x===dogX && y===dogY) return true;
+    return false;
+}
+function pushTarget(tx,ty,nx,ny){
+    if(tx===p1x && ty===p1y){ p1x=nx; p1y=ny; }
+    else if(tx===p2x && ty===p2y){ p2x=nx; p2y=ny; }
+    else if(tx===catX && ty===catY){ catX=nx; catY=ny; }
+    else if(tx===dogX && ty===dogY){ dogX=nx; dogY=ny; }
+}
+
+function initMap1(){
+    isWin = false;
+    alreadyWin = false;
+    p1CanBreak = true;
+    p2CanBreak = true;
+    for(let y=1;y<=15;y++){
+        for(let x=1;x<=30;x++){
+            if(y===1 || y===15 || x===1 || x===30) ground1[x][y]=1;
+            else ground1[x][y]=0;
+        }
+    }
+    p1x = 5; p1y = 3;
+    p2x = 8; p2y = 3;
+    box[0]=[12,5];
+    box[1]=[18,5];
+    box[2]=[12,10];
+    box[3]=[18,10];
+    ex = 15; ey =13;
+
+    for(let y=2;y<=14;y++){
+        for(let x=2;x<=29;x++){
+            if( (Math.abs(x-p1x)<=1 && Math.abs(y-p1y)<=1) || (Math.abs(x-p2x)<=1 && Math.abs(y-p2y)<=1) ) continue;
+            let skipBox=false;
+            for(let i=0;i<4;i++){
+                if(Math.abs(x-box[i][0])<=1 && Math.abs(y-box[i][1])<=1){ skipBox=true;break; }
+            }
+            if(skipBox) continue;
+            if(Math.abs(x-ex)<=1 && Math.abs(y-ey)<=1) continue;
+            if(Math.random()<0.32){
+                ground1[x][y]=1;
+            }
+        }
+    }
+    ground1[ex][ey]=5;
+
+    function getSafePos(){
+        while(true){
+            let rx = Math.floor(Math.random()*28)+2;
+            let ry = Math.floor(Math.random()*13)+2;
+            if(ground1[rx][ry]===0 && !hasEntity(rx,ry) && findBox(rx,ry)===-1){
+                return [rx,ry];
+            }
+        }
+    }
+    [catX,catY] = getSafePos();
+    [dogX,dogY] = getSafePos();
+    aiTimer = Date.now();
+}
+
+function isBoxNearExit(bx,by){
+    if( (bx===ex && by===ey-1) || (bx===ex && by===ey+1) || (bx===ex-1 && by===ey) || (bx===ex+1 && by===ey) ){
+        return true;
+    }
+    return false;
+}
+
+function movePlayer1(px,py,nx,ny,playerId){
+    if(isWin) return;
+    if(ground1[nx][ny]===1) return;
+    const bid = findBox(nx,ny);
+    if(bid!==-1){
+        const bnx = nx + (nx - px[0]);
+        const bny = ny + (ny - py[0]);
+        if(ground1[bnx][bny]===1 || hasEntity(bnx,bny) || findBox(bnx,bny)!==-1) return;
+        box[bid][0]=bnx;
+        box[bid][1]=bny;
+    }
+    if(hasEntity(nx,ny)){
+        const tnx = nx + (nx - px[0]);
+        const tny = ny + (ny - py[0]);
+        if(ground1[tnx][tny]===1 || findBox(tnx,tny)!==-1 || hasEntity(tnx,tny)) return;
+        pushTarget(nx,ny,tnx,tny);
+    }
+    px[0]=nx; py[0]=ny;
+
+    if(!alreadyWin){
+        for(let i=0;i<4;i++){
+            if(isBoxNearExit(box[i][0],box[i][1])){
+                isWin=true;
+                alreadyWin=true;
+                if(playerId===1) score1++;
+                else if(playerId===2) score2++;
+                break;
+            }
+        }
+    }
+}
+
+function aiUpdate(ax,ay){
+    const dirs = [[0,-1],[1,0],[0,1],[-1,0]];
+    const d = Math.floor(Math.random()*4);
+    const nx = ax[0]+dirs[d][0];
+    const ny = ay[1]+dirs[d][1];
+    if(ground1[nx][ny]===1) return;
+    const bid = findBox(nx,ny);
+    if(bid!==-1){
+        const bnx = nx + dirs[d][0];
+        const bny = ny + dirs[d][1];
+        if(ground1[bnx][bny]===1 || hasEntity(bnx,bny) || findBox(bnx,bny)!==-1) return;
+        box[bid][0]=bnx;
+        box[bid][1]=bny;
+    }
+    if(hasEntity(nx,ny)){
+        const tnx = nx + dirs[d][0];
+        const tny = ny + dirs[d][1];
+        if(ground1[tnx][tny]===1 || findBox(tnx,tny)!==-1 || hasEntity(tnx,tny)) return;
+        pushTarget(nx,ny,tnx,tny);
+    }
+    ax[0]=nx; ay[0]=ny;
+}
+
+function draw1(){
+    ctx.fillStyle="#111";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    for(let y=1;y<=15;y++){
+        for(let x=1;x<=30;x++){
+            if(x===p2x && y===p2y){
+                ctx.fillStyle="#ff4444";
+                ctx.fillRect(x*BLOCK_SIZE+1,y*BLOCK_SIZE+1,BLOCK_SIZE-2,BLOCK_SIZE-2);
+            }else if(x===p1x && y===p1y){
+                ctx.fillStyle="#44aaff";
+                ctx.fillRect(x*BLOCK_SIZE+1,y*BLOCK_SIZE+1,BLOCK_SIZE-2,BLOCK_SIZE-2);
+            }else if(x===catX && y===catY){
+                ctx.fillStyle="#4444dd";
+                ctx.fillRect(x*BLOCK_SIZE+1,y*BLOCK_SIZE+1,BLOCK_SIZE-2,BLOCK_SIZE-2);
+            }else if(x===dogX && y===dogY){
+                ctx.fillStyle="#4444dd";
+                ctx.fillRect(x*BLOCK_SIZE+1,y*BLOCK_SIZE+1,BLOCK_SIZE-2,BLOCK_SIZE-2);
+            }else{
+                let bIdx = findBox(x,y);
+                if(bIdx!==-1){
+                    ctx.fillStyle="#ffdd44";
+                    ctx.fillRect(x*BLOCK_SIZE+1,y*BLOCK_SIZE+1,BLOCK_SIZE-2,BLOCK_SIZE-2);
+                }else if(ground1[x][y]===1){
+                    ctx.fillStyle="#777777";
+                    ctx.fillRect(x*BLOCK_SIZE+1,y*BLOCK_SIZE+1,BLOCK_SIZE-2,BLOCK_SIZE-2);
+                }else if(ground1[x][y]===5){
+                    ctx.fillStyle="#22bb44";
+                    ctx.fillRect(x*BLOCK_SIZE+1,y*BLOCK_SIZE+1,BLOCK_SIZE-2,BLOCK_SIZE-2);
+                }
+            }
+        }
+    }
+    document.getElementById("info").innerText = `当前关卡：${level} | 入分数:${score1} | 人分数:${score2}`;
+}
+
+document.addEventListener("keydown",e=>{
+    const dx4 = [0,0,1,-1];
+    const dy4 = [1,-1,0,0];
+    //Z拆墙 p1
+    if(e.code==="KeyZ"){
+        if(p1CanBreak){
+            for(let i=0;i<4;i++){
+                const tx = p1x + dx4[i];
+                const ty = p1y + dy4[i];
+                if(ground1[tx][ty]===1){
+                    ground1[tx][ty]=0;
+                    p1CanBreak=false;
+                    break;
+                }
+            }
+        }
+        e.preventDefault();
+    }
+    //L拆墙 p2
+    if(e.code==="KeyL"){
+        if(p2CanBreak){
+            for(let i=0;i<4;i++){
+                const tx = p2x + dx4[i];
+                const ty = p2y + dy4[i];
+                if(ground1[tx][ty]===1){
+                    ground1[tx][ty]=0;
+                    p2CanBreak=false;
+                    break;
+                }
+            }
+        }
+        e.preventDefault();
+    }
+
+    //玩家2 方向键
+    const p2px = [p2x];
+    const p2py = [p2y];
+    if(e.code==="ArrowUp") movePlayer1(p2px,p2py,p2x,p2y-1,2);
+    if(e.code==="ArrowDown") movePlayer1(p2px,p2py,p2x,p2y+1,2);
+    if(e.code==="ArrowLeft") movePlayer1(p2px,p2py,p2x-1,p2y,2);
+    if(e.code==="ArrowRight") movePlayer1(p2px,p2py,p2x+1,p2y,2);
+    p2x=p2px[0]; p2y=p2py[0];
+
+    //玩家1 WASD
+    const p1px = [p1x];
+    const p1py = [p1y];
+    if(e.code==="KeyW") movePlayer1(p1px,p1py,p1x,p1y-1,1);
+    if(e.code==="KeyS") movePlayer1(p1px,p1py,p1x,p1y+1,1);
+    if(e.code==="KeyA") movePlayer1(p1px,p1py,p1x-1,p1y,1);
+    if(e.code==="KeyD") movePlayer1(p1px,p1py,p1x+1,p1y,1);
+    p1x=p1px[0]; p1y=p1py[0];
+
+    if(e.code==="Escape"){
+        alert("感谢游玩！刷新页面重新开局");
+    }
+});
+
+function loop(){
+    const now = Date.now();
+    //猫狗AI 450ms移动一次
+    if(now - aiTimer > 450){
+        const catP = [catX,catY];
+        const dogP = [dogX,dogY];
+        aiUpdate(catP,catP);
+        catX = catP[0]; catY=catP[1];
+        aiUpdate(dogP,dogP);
+        dogX = dogP[0]; dogY=dogP[1];
+        aiTimer = now;
+    }
+
+    if(isWin){
+        setTimeout(()=>{
+            level++;
+            initMap1();
+        },900);
+    }
+
+    draw1();
+}
+
+//初始化游戏
+level=1;
+score1=0;score2=0;
+initMap1();
+setInterval(loop,60);
+</script>
+</body>
+</html>

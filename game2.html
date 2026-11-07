@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>双人射击对战游戏</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#222;display:flex;justify-content:center;align-items:center;height:100vh;overflow:hidden}
+canvas{border:2px solid #fff;background:#964B00;}
+</style>
+</head>
+<body>
+<canvas id="game" width="800" height="699"></canvas>
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const right = 0;
+const left = 1;
+const up = 2;
+const down = 3;
+const BULLET_MAX = 30;
+
+// 子弹类
+class Bullet{
+    constructor(){
+        this.x=0;this.y=0;this.alive=false;this.dir=0;
+    }
+}
+//敌人
+class Enemy{
+    constructor(){
+        this.x=0;this.y=0;this.w=100;this.h=100;
+        this.alive=false;this.dir=0;this.shootTimer=0;
+    }
+}
+
+//游戏变量
+let x1=300,y1=698/2,mian1=right;
+let x2=500,y2=400,mian2=left;
+let hp=3;
+let score=0,score2=0;
+
+let bullet = Array(BULLET_MAX).fill(null).map(()=>new Bullet());
+let bullet2 = Array(BULLET_MAX).fill(null).map(()=>new Bullet());
+let enemyBullet = Array(BULLET_MAX).fill(null).map(()=>new Bullet());
+
+let shotCd=false,shotCd2=false;
+let enemy = new Enemy();
+let enemySpawnTimer=0;
+let invincible=0;
+let state=0;
+let countDown=0;
+let gameOver = false; // 新增游戏结束标记
+
+//按键记录
+const keys = {};
+document.addEventListener("keydown",e=>{
+    keys[e.code]=true;
+    if(e.code==="Escape"){
+        state=0;
+        countDown=0;
+        gameOver = false; // ESC重置结束状态
+    }
+});
+document.addEventListener("keyup",e=>keys[e.code]=false);
+
+function resetSingle(){
+    state=1;
+    countDown=90;
+    x1=300;y1=698/2;
+    hp=3;score=0;
+    enemy.alive=false;
+    enemySpawnTimer=0;
+    invincible=0;
+    bullet.forEach(b=>b.alive=false);
+    enemyBullet.forEach(b=>b.alive=false);
+    gameOver = false;
+}
+function resetDouble(){
+    state=2;
+    countDown=90;
+    x1=200;y1=350;
+    x2=550;y2=350;
+    score=0;score2=0;
+    bullet.forEach(b=>b.alive=false);
+    bullet2.forEach(b=>b.alive=false);
+    gameOver = false;
+}
+
+// 绘制方块+内部方向箭头函数
+function drawPlayerBox(x,y,color,dir){
+    ctx.fillStyle = color;
+    ctx.fillRect(x,y,100,100);
+    ctx.fillStyle="#fff";
+    ctx.font="60px sans-serif";
+    let arrow = "";
+    if(dir === right) arrow="→";
+    else if(dir === left) arrow="←";
+    else if(dir === up) arrow="↑";
+    else if(dir === down) arrow="↓";
+    ctx.fillText(arrow, x+25, y+70);
+}
+
+function gameLoop(){
+    ctx.fillStyle="#964B00";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    if(invincible>0) invincible--;
+
+    if(state===0){
+        //主菜单
+        ctx.fillStyle="#fff";
+        ctx.font="24px 黑体";
+        ctx.fillText("按1 单人模式",300,320);
+        ctx.fillText("按2 双人模式",300,420);
+        if(keys["Digit1"]){
+            resetSingle();
+        }
+        if(keys["Digit2"]){
+            resetDouble();
+        }
+    }else if(state===1 || state===2){
+        if(gameOver){
+            //游戏结束画面，卡住，按ESC回主菜单
+            ctx.fillStyle="red";
+            ctx.font="32px 黑体";
+            ctx.fillText("GAME OVER",350,300);
+            ctx.fillText(`最终分数：${score}`,340,350);
+            ctx.fillStyle="#ffffff";
+            ctx.font="20px 黑体";
+            ctx.fillText("按ESC返回主菜单",330,400);
+            requestAnimationFrame(gameLoop);
+            return;
+        }
+
+        if(countDown>0){
+            countDown--;
+            ctx.fillStyle="#fff";
+            ctx.font="60px 黑体";
+            let text="";
+            if(countDown>60) text="即将进入游戏 3";
+            else if(countDown>30) text="即将进入游戏 2";
+            else text="即将进入游戏 1";
+            ctx.fillText(text,220,350);
+            requestAnimationFrame(gameLoop);
+            return;
+        }
+
+        //P1 WASD
+        if(keys["KeyW"] && y1-5>=0){y1-=5;mian1=up;}
+        if(keys["KeyS"] && y1+5 <= 699-100){y1+=5;mian1=down;}
+        if(keys["KeyA"] && x1-5>=0){x1-=5;mian1=left;}
+        if(keys["KeyD"] && x1+5 <= 800-100){x1+=5;mian1=right;}
+
+        //P2 方向键 双人
+        if(state===2){
+            if(keys["ArrowUp"] && y2-5>=0){y2-=5;mian2=up;}
+            if(keys["ArrowDown"] && y2+5 <= 699-100){y2+=5;mian2=down;}
+            if(keys["ArrowLeft"] && x2-5>=0){x2-=5;mian2=left;}
+            if(keys["ArrowRight"] && x2+5 <= 800-100){x2+=5;mian2=right;}
+        }
+
+        //P1 空格发射
+        const spacePress = keys["Space"];
+        if(spacePress && !shotCd){
+            for(let i=0;i<BULLET_MAX;i++){
+                if(!bullet[i].alive){
+                    bullet[i].alive=true;
+                    bullet[i].dir=mian1;
+                    if(mian1===right){bullet[i].x=x1+50;bullet[i].y=y1;}
+                    else if(mian1===left){bullet[i].x=x1-50;bullet[i].y=y1;}
+                    else if(mian1===up){bullet[i].x=x1;bullet[i].y=y1-50;}
+                    else if(mian1===down){bullet[i].x=x1;bullet[i].y=y1+50;}
+                    break;
+                }
+            }
+            shotCd=true;
+        }
+        if(!spacePress) shotCd=false;
+
+        //P2回车发射
+        if(state===2){
+            const enterPress = keys["Enter"];
+            if(enterPress && !shotCd2){
+                for(let i=0;i<BULLET_MAX;i++){
+                    if(!bullet2[i].alive){
+                        bullet2[i].alive=true;
+                        bullet2[i].dir=mian2;
+                        if(mian2===right){bullet2[i].x=x2+50;bullet2[i].y=y2;}
+                        else if(mian2===left){bullet2[i].x=x2-50;bullet2[i].y=y2;}
+                        else if(mian2===up){bullet2[i].x=x2;bullet2[i].y=y2-50;}
+                        else if(mian2===down){bullet2[i].x=x2;bullet2[i].y=y2+50;}
+                        break;
+                    }
+                }
+                shotCd2=true;
+            }
+            if(!enterPress) shotCd2=false;
+        }
+
+        //P1子弹更新
+        for(let i=0;i<BULLET_MAX;i++){
+            const b = bullet[i];
+            if(b.alive){
+                if(b.dir===up) b.y-=8;
+                else if(b.dir===down) b.y+=8;
+                else if(b.dir===left) b.x-=8;
+                else if(b.dir===right) b.x+=8;
+                if(b.y<-20||b.y>700||b.x<-20||b.x>800) b.alive=false;
+                ctx.fillStyle="#ffff00";
+                ctx.fillRect(b.x,b.y,20,20);
+
+                if(state===1 && enemy.alive){
+                    if(b.x < enemy.x+enemy.w && b.x+20>enemy.x && b.y<enemy.y+enemy.h && b.y+20>enemy.y){
+                        enemy.alive=false;
+                        b.alive=false;
+                        score+=100;
+                    }
+                }
+                if(state===2){
+                    if(b.x<x2+100 && b.x+20>x2 && b.y<y2+100 && b.y+20>y2){
+                        b.alive=false;
+                        score+=1;
+                    }
+                }
+            }
+        }
+
+        //P2子弹
+        if(state===2){
+            for(let i=0;i<BULLET_MAX;i++){
+                const b = bullet2[i];
+                if(b.alive){
+                    if(b.dir===up) b.y-=8;
+                    else if(b.dir===down) b.y+=8;
+                    else if(b.dir===left) b.x-=8;
+                    else if(b.dir===right) b.x+=8;
+                    if(b.y<-20||b.y>700||b.x<-20||b.x>800) b.alive=false;
+                    ctx.fillStyle="#00ff00";
+                    ctx.fillRect(b.x,b.y,20,20);
+                    if(b.x<x1+100 && b.x+20>x1 && b.y<y1+100 && b.y+20>y1){
+                        b.alive=false;
+                        score2+=1;
+                    }
+                }
+            }
+        }
+
+        //单人敌人逻辑
+        if(state===1){
+            enemySpawnTimer++;
+            if(!enemy.alive && enemySpawnTimer>100){
+                do{
+                    enemy.x = Math.random()*(800-enemy.w);
+                    enemy.y = Math.random()*200;
+                }while(Math.abs(enemy.x-x1)<220 && Math.abs(enemy.y-y1)<220);
+                enemy.alive=true;
+                enemy.shootTimer=0;
+                enemySpawnTimer=0;
+            }
+            if(enemy.alive){
+                const spd=2;
+                if(enemy.x<x1){enemy.x+=spd;enemy.dir=right;}
+                else if(enemy.x>x1){enemy.x-=spd;enemy.dir=left;}
+                else{
+                    if(enemy.y<y1){enemy.y+=spd;enemy.dir=down;}
+                    else{enemy.y-=spd;enemy.dir=up;}
+                }
+                enemy.x=Math.max(0,Math.min(800-enemy.w,enemy.x));
+                enemy.y=Math.max(0,Math.min(700-enemy.h,enemy.y));
+                //敌人紫色方块+方向箭头
+                drawPlayerBox(enemy.x,enemy.y,"#9933ff",enemy.dir);
+
+                enemy.shootTimer++;
+                if(enemy.shootTimer>=90){
+                    for(let i=0;i<BULLET_MAX;i++){
+                        if(!enemyBullet[i].alive){
+                            enemyBullet[i].alive=true;
+                            enemyBullet[i].x=enemy.x+50;
+                            enemyBullet[i].y=enemy.y+50;
+                            enemyBullet[i].dir = (enemy.y<y1) ? down : up;
+                            break;
+                        }
+                    }
+                    enemy.shootTimer=0;
+                }
+
+                //敌人撞玩家
+                if(invincible<=0){
+                    if(x1 < enemy.x+enemy.w && x1+100>enemy.x && y1<enemy.y+enemy.h && y1+100>enemy.y){
+                        hp--;
+                        invincible=60;
+                        enemy.alive=false;
+                        if(hp<=0){
+                            gameOver = true; //开启结束画面，不再直接退出
+                        }
+                    }
+                }
+            }
+
+            //敌人子弹
+            for(let i=0;i<BULLET_MAX;i++){
+                const b = enemyBullet[i];
+                if(b.alive){
+                    if(b.dir===up) b.y-=6;
+                    else if(b.dir===down) b.y+=6;
+                    if(b.x<0||b.x>800||b.y<0||b.y>700) b.alive=false;
+                    ctx.fillStyle="#ff0000";
+                    ctx.fillRect(b.x,b.y,18,18);
+                    if(invincible<=0){
+                        if(x1 < b.x+18 && x1+100>b.x && y1 < b.y+18 && y1+100>b.y){
+                            hp--;
+                            invincible=60;
+                            b.alive=false;
+                            if(hp<=0){
+                                gameOver = true;
+                            }
+                        }
+                    }
+                }
+            }
+            //血条
+            ctx.fillStyle="#000";
+            ctx.fillRect(10,10,210,25);
+            ctx.fillStyle="#ff0000";
+            ctx.fillRect(12,12,hp*65,21);
+        }
+
+        //绘制P1（红色方块+箭头，无敌闪烁）
+        if(state===1){
+            if(invincible===0 || (invincible%6<3)){
+                drawPlayerBox(x1,y1,"#ff4444",mian1);
+            }
+        }else{
+            drawPlayerBox(x1,y1,"#ff4444",mian1);
+        }
+        //P2 蓝色方块+方向箭头，双人模式
+        if(state===2){
+            drawPlayerBox(x2,y2,"#4488ff",mian2);
+        }
+
+        //分数文字
+        ctx.fillStyle="#fff";
+        ctx.font="24px 黑体";
+        if(state===1){
+            ctx.fillText(`分数：${score}`,230,30);
+        }else{
+            ctx.fillText(`P1:${score}   P2:${score2}`,230,30);
+        }
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+gameLoop();
+</script>
+</body>
+</html>

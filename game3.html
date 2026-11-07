@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>双人赛车无限版</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#111;display:flex;justify-content:center;align-items:center;height:100vh}
+canvas{border:2px solid #fff}
+</style>
+</head>
+<body>
+<canvas id="game" width="800" height="699"></canvas>
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+// 常量
+const trackCnt = 5;
+const lineW = 4;
+const totalLineW = (trackCnt - 1) * lineW;
+const trackW = (800 - totalLineW) / trackCnt;
+const carSize = 100;
+
+// 游戏变量
+let dao = 80 * 10;
+let sr1 = 0, sr2 = 0;
+let inv1 = 0, inv2 = 0;
+let flash1 = 0, flash2 = 0;
+let moveCooldown = 0;
+
+let popY1 = 0, popTimer1 = 0;
+let popY2 = 0, popTimer2 = 0;
+
+// 玩家坐标
+let x1 = 160 * 1;
+let x2 = 160 * 3;
+const playerY = 580; // 固定玩家y，重叠也不会错位
+
+// 敌车dx,dy；箱子bx,by
+let dx = Math.floor(Math.random() * 5) * 160;
+let dy = -100;
+let bx = Math.floor(Math.random() * 5) * 160;
+let by = -100;
+while(bx === dx) bx = Math.floor(Math.random() *5)*160;
+
+//按键状态
+const keys = {};
+document.addEventListener("keydown",e=>{
+    keys[e.code] = true;
+});
+document.addEventListener("keyup",e=>{
+    keys[e.code] = false;
+});
+
+function drawTrack(){
+    // 赛道灰色
+    ctx.fillStyle = "rgb(128,128,128)";
+    let x = 0;
+    for(let i=0;i<trackCnt;i++){
+        ctx.fillRect(x,0,trackW,698);
+        x += trackW;
+        if(i !== trackCnt-1){
+            ctx.fillStyle = "#fff";
+            ctx.fillRect(x,0,lineW,698);
+            x += lineW;
+            ctx.fillStyle = "rgb(128,128,128)";
+        }
+    }
+}
+
+function drawCar(x,y,color,flash){
+    if(flash>0 && flash%2 ===1) return;
+    ctx.fillStyle = color;
+    ctx.fillRect(x,y,carSize,carSize);
+    ctx.fillStyle="#000";
+    ctx.font="40px sans-serif";
+    ctx.fillText("车",x+25,y+65);
+}
+
+function drawObstacle(x,y,color){
+    ctx.fillStyle = color;
+    ctx.fillRect(x,y,carSize,carSize);
+}
+
+function loop(){
+    ctx.clearRect(0,0,800,699);
+    drawTrack();
+
+    // UI分数
+    ctx.fillStyle="red";
+    ctx.font="24px sans-serif";
+    ctx.fillText("红车分数：",20,35);
+    ctx.fillText(sr1,120,35);
+
+    ctx.fillStyle="#4488ff";
+    ctx.fillText("蓝车分数：",650,35);
+    ctx.fillText(sr2,750,35);
+    ctx.fillStyle="#fff";
+
+    // 障碍物移动
+    if(dao>0){
+        dy +=5;
+        by +=5;
+    }else{
+        dy +=10;
+        by +=10;
+    }
+
+    // 敌车重置
+    if(dy>698){
+        dx = Math.floor(Math.random()*5)*160;
+        dy = -100;
+        bx = Math.floor(Math.random()*5)*160;
+        by = -100;
+        while(bx===dx) bx = Math.floor(Math.random()*5)*160;
+    }
+    //箱子重置
+    if(by>698){
+        bx = Math.floor(Math.random()*5)*160;
+        by = -100;
+        while(bx===dx) bx = Math.floor(Math.random()*5)*160;
+    }
+
+    //计时器递减
+    if(inv1>0) inv1--;
+    if(inv2>0) inv2--;
+    if(flash1>0) flash1--;
+    if(flash2>0) flash2--;
+    if(moveCooldown>0) moveCooldown--;
+
+    if(popTimer1>0){ popTimer1--; popY1 -=2; }
+    if(popTimer2>0){ popTimer2--; popY2 -=2; }
+
+    //碰撞检测 玩家1
+    if(flash1===0 && inv1===0){
+        //撞箱子
+        if(bx < x1+100 && bx+100 > x1 && by < playerY+100 && by+100>playerY){
+            flash1 = 40; inv1 =80; sr2++;
+            popTimer2 =30; popY2 =500;
+        }
+        //撞敌车
+        else if(dx < x1+100 && dx+100>x1 && dy < playerY+100 && dy+100>playerY){
+            flash1 =40; inv1=80; sr2++;
+            popTimer2=30; popY2=500;
+        }
+    }
+    //玩家2碰撞
+    if(flash2===0 && inv2===0){
+        //撞箱子
+        if(bx < x2+100 && bx+100>x2 && by < playerY+100 && by+100>playerY){
+            flash2=40; inv2=80; sr1++;
+            popTimer1=30; popY1=500;
+        }
+        //撞敌车
+        else if(dx < x2+100 && dx+100>x2 && dy < playerY+100 && dy+100>playerY){
+            flash2=40; inv2=80; sr1++;
+            popTimer1=30; popY1=500;
+        }
+    }
+
+    //玩家移动 160一格
+    if(moveCooldown ===0){
+        if(keys["KeyA"]){
+            if(x1-160 >=0) x1 -=160;
+            moveCooldown =10;
+        }
+        else if(keys["KeyD"]){
+            if(x1+160 <= 160*4) x1 +=160;
+            moveCooldown =10;
+        }
+        if(keys["ArrowLeft"]){
+            if(x2-160 >=0) x2 -=160;
+            moveCooldown =10;
+        }
+        else if(keys["ArrowRight"]){
+            if(x2+160 <=160*4) x2 +=160;
+            moveCooldown =10;
+        }
+    }
+
+    //绘制车辆
+    drawCar(x1,playerY,"#ff4444",flash1);
+    drawCar(x2,playerY,"#4488ff",flash2);
+    drawObstacle(dx,dy,"#9933ff"); //敌车紫色
+    drawObstacle(bx,by,"#ffaa00"); //箱子橙色
+
+    //飘字
+    if(popTimer1>0){
+        ctx.fillStyle="#ffff00";
+        ctx.fillText("+1",x1+20,popY1);
+    }
+    if(popTimer2>0){
+        ctx.fillStyle="#ffff00";
+        ctx.fillText("+1",x2+20,popY2);
+    }
+
+    ctx.fillStyle="#fff";
+    ctx.font="18px sans-serif";
+    ctx.fillText("此技术由萝卜技术有限公司提供",300,685);
+
+    dao--;
+    requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>飞机大战</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:"Microsoft YaHei",sans-serif}
+body{background:#111;color:#fff;display:flex;flex-direction:column;align-items:center;padding:20px}
+#canvas{background:#222;border:2px solid #888}
+#info{font-size:18px;margin-bottom:8px;height:24px}
+#tip{margin-top:8px;font-size:15px;color:#aaa;text-align:center}
+</style>
+</head>
+<body>
+<div id="info">===== 飞机大战 =====</div>
+<canvas id="canvas"></canvas>
+<div id="tip">P1：WASD移动，空格发射子弹｜P2：方向键移动，回车发射（双人模式）</div>
+
+<script>
+const W = 22;
+const H = 15;
+const BLOCK = 26;
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+canvas.width = W * BLOCK;
+canvas.height = H * BLOCK;
+const infoEl = document.getElementById("info");
+
+let gameMode = 0; //0菜单，1单人，2双人
+
+//玩家1
+let p1x = Math.floor(W/4);
+let p1y = H - 2;
+let b1Exist = false;
+let b1x, b1y;
+
+//玩家2
+let p2x = Math.floor(W*3/4);
+let p2y = 2;
+let b2Exist = false;
+let b2x, b2y;
+
+//单人敌机
+let ex = 0;
+let ey = 1;
+
+let score1 = 0;
+let score2 = 0;
+
+const MOVE_COOLDOWN = 120;
+let lastMove1 = 0;
+let lastMove2 = 0;
+const ENEMY_INTERVAL = 300;
+let lastEnemyTick = 0;
+
+const keys = {};
+document.addEventListener("keydown", e=>{
+    keys[e.code] = true;
+    const now = Date.now();
+
+    //菜单选模式
+    if(gameMode === 0){
+        if(e.code === "Digit1"){
+            gameMode = 1;
+            resetGame();
+        }
+        if(e.code === "Digit2"){
+            gameMode = 2;
+            resetGame();
+        }
+        return;
+    }
+
+    //玩家1 WASD
+    if(now - lastMove1 >= MOVE_COOLDOWN){
+        if(e.code === "KeyA" && p1x>1){ p1x--; lastMove1=now; }
+        if(e.code === "KeyD" && p1x<W-2){ p1x++; lastMove1=now; }
+        if(e.code === "KeyW" && p1y>1){ p1y--; lastMove1=now; }
+        if(e.code === "KeyS" && p1y<H-2){ p1y++; lastMove1=now; }
+    }
+    //玩家1 空格发射
+    if(e.code === "Space" && !b1Exist){
+        b1Exist = true;
+        b1x = p1x;
+        b1y = p1y - 1;
+    }
+
+    //双人模式玩家2
+    if(gameMode === 2){
+        if(now - lastMove2 >= MOVE_COOLDOWN){
+            if(e.code === "ArrowUp" && p2y>1){ p2y--; lastMove2=now; }
+            if(e.code === "ArrowDown" && p2y<H-2){ p2y++; lastMove2=now; }
+            if(e.code === "ArrowLeft" && p2x>1){ p2x--; lastMove2=now; }
+            if(e.code === "ArrowRight" && p2x<W-2){ p2x++; lastMove2=now; }
+        }
+        //玩家2回车发射
+        if(e.code === "Enter" && !b2Exist){
+            b2Exist = true;
+            b2x = p2x;
+            b2y = p2y + 1;
+        }
+    }
+});
+document.addEventListener("keyup",e=>keys[e.code]=false);
+
+function resetGame(){
+    p1x = Math.floor(W/4);
+    p1y = H - 2;
+    b1Exist = false;
+    b2Exist = false;
+    p2x = Math.floor(W*3/4);
+    p2y = 2;
+    ex = Math.floor(Math.random()*(W-2))+1;
+    ey = 1;
+    score1 = 0;
+    score2 = 0;
+    lastEnemyTick = Date.now();
+}
+
+function draw(){
+    ctx.fillStyle="#111";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    //绘制围墙
+    ctx.fillStyle="#888";
+    for(let j=0;j<W;j++){
+        ctx.fillRect(j*BLOCK,0,BLOCK-1,BLOCK-1);
+        ctx.fillRect(j*BLOCK,(H-1)*BLOCK,BLOCK-1,BLOCK-1);
+    }
+    for(let i=0;i<H;i++){
+        ctx.fillRect(0,i*BLOCK,BLOCK-1,BLOCK-1);
+        ctx.fillRect((W-1)*BLOCK,i*BLOCK,BLOCK-1,BLOCK-1);
+    }
+
+    if(gameMode === 0){
+        infoEl.innerText = "===== 飞机大战 =====";
+        ctx.fillStyle="#fff";
+        ctx.font="24px Microsoft YaHei";
+        ctx.fillText("按数字1单人，2双人", 30, canvas.height/2);
+        return;
+    }
+
+    //玩家1 蓝色
+    ctx.fillStyle="#0088ff";
+    ctx.fillRect(p1x*BLOCK+2, p1y*BLOCK+2, BLOCK-4, BLOCK-4);
+
+    //玩家2 红色（双人）
+    if(gameMode===2){
+        ctx.fillStyle="#ff4444";
+        ctx.fillRect(p2x*BLOCK+2, p2y*BLOCK+2, BLOCK-4, BLOCK-4);
+    }
+
+    //敌机 红色（单人）
+    if(gameMode===1){
+        ctx.fillStyle="#ff4444";
+        ctx.fillRect(ex*BLOCK+2, ey*BLOCK+2, BLOCK-4, BLOCK-4);
+    }
+
+    //子弹1 黄色，向上
+    if(b1Exist){
+        ctx.fillStyle="#ffdd00";
+        ctx.fillRect(b1x*BLOCK+6, b1y*BLOCK+6, BLOCK-12, BLOCK-12);
+    }
+    //子弹2 黄色，向下（双人）
+    if(gameMode===2 && b2Exist){
+        ctx.fillStyle="#ffdd00";
+        ctx.fillRect(b2x*BLOCK+6, b2y*BLOCK+6, BLOCK-12, BLOCK-12);
+    }
+
+    //文字信息
+    if(gameMode===1){
+        infoEl.innerText = `分数:${score1}`;
+    }else{
+        infoEl.innerText = `玩家1(一)分数:${score1}   玩家2(二)分数:${score2}`;
+    }
+}
+
+function logic(){
+    if(gameMode === 0) return;
+    const now = Date.now();
+
+    //单人：敌机撞到玩家
+    if(gameMode===1){
+        if(ey === p1y && ex === p1x){
+            score1 -= 30;
+            ex = Math.floor(Math.random()*(W-2))+1;
+            ey = 1;
+            if(score1 <= 0){
+                infoEl.innerText = "分数归零，游戏失败！刷新页面重开";
+                gameMode = -1;
+                return;
+            }
+        }
+    }
+
+    //子弹1向上飞
+    if(b1Exist){
+        b1y--;
+        if(b1y <= 0){
+            b1Exist = false;
+        }
+        if(gameMode===1){
+            //打中敌机
+            if(b1y === ey && b1x === ex){
+                b1Exist = false;
+                score1 += 10;
+                ex = Math.floor(Math.random()*(W-2))+1;
+                ey = 1;
+            }
+        }else{
+            //双人打中P2
+            if(b1y === p2y && b1x === p2x){
+                b1Exist = false;
+                score1 +=1;
+            }
+        }
+    }
+
+    //双人子弹2向下飞
+    if(gameMode===2 && b2Exist){
+        b2y++;
+        if(b2y >= H-1){
+            b2Exist = false;
+        }
+        //打中P1
+        if(b2y === p1y && b2x === p1x){
+            b2Exist = false;
+            score2 +=1;
+        }
+    }
+
+    //单人敌机移动
+    if(gameMode===1){
+        if(now - lastEnemyTick >= ENEMY_INTERVAL){
+            ey++;
+            if(ey >= H-1){
+                ex = Math.floor(Math.random()*(W-2))+1;
+                ey = 1;
+            }
+            lastEnemyTick = now;
+        }
+    }
+}
+
+function loop(){
+    logic();
+    draw();
+}
+setInterval(loop,15);
+</script>
+</body>
+</html>

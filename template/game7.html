@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>双人俄罗斯方块</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Microsoft YaHei,sans-serif}
+body{background:#111;color:#fff;padding:20px;display:flex;flex-direction:column;align-items:center}
+#container{display:flex;gap:30px}
+.canvasWrap{display:flex;flex-direction:column;align-items:center}
+canvas{background:#222;border:2px solid #888}
+.info{margin-top:8px;font-size:18px;height:24px}
+#tip{margin-top:12px;color:#aaa;text-align:center}
+</style>
+</head>
+<body>
+<div id="container">
+    <div class="canvasWrap">
+        <canvas id="c1"></canvas>
+        <div class="info" id="info1">左玩家分数:0</div>
+    </div>
+    <div class="canvasWrap">
+        <canvas id="c2"></canvas>
+        <div class="info" id="info2">右玩家分数:0</div>
+    </div>
+</div>
+<div id="tip">左玩家：W旋转 A左 D右 S下移｜空格 直接落底<br>右玩家：↑旋转 ←左 →右 ↓下移｜回车Enter直接落底</div>
+
+<script>
+const GAME_W = 10;
+const GAME_H = 20;
+const BLOCK_SIZE = 24;
+
+const shape = [
+    [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+    [[0,1,1,0],[0,1,1,0],[0,0,0,0],[0,0,0,0]],
+    [[0,1,0,0],[1,1,1,0],[0,0,0,0],[0,0,0,0]],
+    [[0,0,1,0],[1,1,1,0],[0,0,0,0],[0,0,0,0]],
+    [[1,0,0,0],[1,1,1,0],[0,0,0,0],[0,0,0,0]],
+    [[0,1,1,0],[1,1,0,0],[0,0,0,0],[0,0,0,0]],
+    [[1,1,0,0],[0,1,1,0],[0,0,0,0],[0,0,0,0]]
+];
+
+class Block {
+    constructor(){
+        this.type = 0;
+        this.rot = 0;
+        this.x = 0;
+        this.y = 0;
+        this.color = 0;
+    }
+}
+class Player {
+    constructor(canvasId,infoId){
+        this.canvas = document.getElementById(canvasId);
+        this.ctx = this.canvas.getContext("2d");
+        this.canvas.width = GAME_W * BLOCK_SIZE;
+        this.canvas.height = GAME_H * BLOCK_SIZE;
+        this.infoEl = document.getElementById(infoId);
+        this.gameMap = Array.from({length:GAME_H},()=>Array(GAME_W).fill(0));
+        this.colorMap = Array.from({length:GAME_H},()=>Array(GAME_W).fill(15));
+        this.curBlock = new Block();
+        this.score = 0;
+        this.tick = 0;
+        this.gameOver = false;
+    }
+
+    getRotated(out, type, rot){
+        let temp = JSON.parse(JSON.stringify(shape[type]));
+        for(let r=0; r<rot%4; r++){
+            let buf = Array.from({length:4},()=>Array(4).fill(0));
+            for(let i=0;i<4;i++){
+                for(let j=0;j<4;j++){
+                    buf[j][3-i] = temp[i][j];
+                }
+            }
+            temp = buf;
+        }
+        for(let i=0;i<4;i++){
+            for(let j=0;j<4;j++) out[i][j]=temp[i][j];
+        }
+    }
+
+    checkCollision(bx,by,type,rot){
+        let mat = Array.from({length:4},()=>Array(4).fill(0));
+        this.getRotated(mat,type,rot);
+        for(let i=0;i<4;i++){
+            for(let j=0;j<4;j++){
+                if(mat[i][j]){
+                    let nx = bx + j;
+                    let ny = by + i;
+                    if(nx<0 || nx>=GAME_W) return true;
+                    if(ny >= GAME_H) return true;
+                    if(ny>=0 && this.gameMap[ny][nx]===1) return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    spawnBlock(){
+        this.curBlock.type = Math.floor(Math.random()*7);
+        this.curBlock.rot = 0;
+        this.curBlock.x = Math.floor(GAME_W/2)-2;
+        this.curBlock.y = 0;
+        this.curBlock.color = Math.random()>0.5 ? 9 : 12;
+    }
+
+    lockBlock(){
+        let mat = Array.from({length:4},()=>Array(4).fill(0));
+        this.getRotated(mat,this.curBlock.type,this.curBlock.rot);
+        for(let i=0;i<4;i++){
+            for(let j=0;j<4;j++){
+                if(mat[i][j]){
+                    let nx = this.curBlock.x + j;
+                    let ny = this.curBlock.y + i;
+                    if(ny>=0){
+                        this.gameMap[ny][nx]=1;
+                        this.colorMap[ny][nx]=this.curBlock.color;
+                    }
+                }
+            }
+        }
+    }
+
+    clearLines(){
+        let lines = 0;
+        for(let y=GAME_H-1;y>=0;y--){
+            let full = true;
+            for(let x=0;x<GAME_W;x++){
+                if(this.gameMap[y][x]===0){full=false;break;}
+            }
+            if(full){
+                lines++;
+                for(let k=y;k>0;k--){
+                    for(let x=0;x<GAME_W;x++){
+                        this.gameMap[k][x] = this.gameMap[k-1][x];
+                        this.colorMap[k][x] = this.colorMap[k-1][x];
+                    }
+                }
+                for(let x=0;x<GAME_W;x++){
+                    this.gameMap[0][x]=0;
+                    this.colorMap[0][x]=15;
+                }
+                y++;
+            }
+        }
+        this.score += lines;
+    }
+
+    init(){
+        this.score=0;
+        this.tick=0;
+        this.gameOver=false;
+        for(let i=0;i<GAME_H;i++){
+            for(let j=0;j<GAME_W;j++){
+                this.gameMap[i][j]=0;
+                this.colorMap[i][j]=15;
+            }
+        }
+        this.spawnBlock();
+    }
+
+    hardDrop(){
+        while(!this.checkCollision(this.curBlock.x, this.curBlock.y+1, this.curBlock.type, this.curBlock.rot)){
+            this.curBlock.y++;
+        }
+        this.lockBlock();
+        this.clearLines();
+        this.spawnBlock();
+        if(this.checkCollision(this.curBlock.x, this.curBlock.y, this.curBlock.type, this.curBlock.rot)){
+            this.gameOver=true;
+        }
+    }
+
+    draw(){
+        let tempMap = JSON.parse(JSON.stringify(this.gameMap));
+        let tempColor = JSON.parse(JSON.stringify(this.colorMap));
+        let mat = Array.from({length:4},()=>Array(4).fill(0));
+        this.getRotated(mat,this.curBlock.type,this.curBlock.rot);
+        for(let i=0;i<4;i++){
+            for(let j=0;j<4;j++){
+                if(mat[i][j]){
+                    let nx = this.curBlock.x + j;
+                    let ny = this.curBlock.y + i;
+                    if(ny>=0 && ny<GAME_H && nx>=0 && nx<GAME_W){
+                        tempMap[ny][nx]=2;
+                        tempColor[ny][nx]=this.curBlock.color;
+                    }
+                }
+            }
+        }
+
+        this.ctx.fillStyle="#222";
+        this.ctx.fillRect(0,0,this.canvas.width,this.canvas.height);
+        for(let y=0;y<GAME_H;y++){
+            for(let x=0;x<GAME_W;x++){
+                if(tempMap[y][x]===1 || tempMap[y][x]===2){
+                    let c = tempColor[y][x];
+                    if(c===9) this.ctx.fillStyle="#44aaff";
+                    else if(c===12) this.ctx.fillStyle="#ff5555";
+                    else this.ctx.fillStyle="#cccccc";
+                    this.ctx.fillRect(x*BLOCK_SIZE+1,y*BLOCK_SIZE+1,BLOCK_SIZE-2,BLOCK_SIZE-2);
+                }
+            }
+        }
+        this.infoEl.innerText = `分数:${this.score}`;
+    }
+
+    updateTick(){
+        this.tick++;
+        if(this.tick >=12){
+            this.tick=0;
+            if(!this.checkCollision(this.curBlock.x, this.curBlock.y+1, this.curBlock.type, this.curBlock.rot)){
+                this.curBlock.y++;
+            }else{
+                this.lockBlock();
+                this.clearLines();
+                this.spawnBlock();
+                if(this.checkCollision(this.curBlock.x, this.curBlock.y, this.curBlock.type, this.curBlock.rot)){
+                    this.gameOver=true;
+                }
+            }
+        }
+    }
+}
+
+const p1 = new Player("c1","info1");
+const p2 = new Player("c2","info2");
+p1.init();
+p2.init();
+
+document.addEventListener("keydown",e=>{
+    if(p1.gameOver && p2.gameOver) return;
+    //左玩家 WASD + 空格
+    if(e.code==="KeyW"){
+        let nr = (p1.curBlock.rot+1)%4;
+        if(!p1.checkCollision(p1.curBlock.x,p1.curBlock.y,p1.curBlock.type,nr)) p1.curBlock.rot=nr;
+    }
+    if(e.code==="KeyA"){
+        if(!p1.checkCollision(p1.curBlock.x-1,p1.curBlock.y,p1.curBlock.type,p1.curBlock.rot)) p1.curBlock.x--;
+    }
+    if(e.code==="KeyD"){
+        if(!p1.checkCollision(p1.curBlock.x+1,p1.curBlock.y,p1.curBlock.type,p1.curBlock.rot)) p1.curBlock.x++;
+    }
+    if(e.code==="KeyS"){
+        if(!p1.checkCollision(p1.curBlock.x,p1.curBlock.y+1,p1.curBlock.type,p1.curBlock.rot)) p1.curBlock.y++;
+    }
+    if(e.code==="Space"){
+        p1.hardDrop();
+    }
+
+    //右玩家方向键 + 回车
+    if(e.code==="ArrowUp"){
+        let nr = (p2.curBlock.rot+1)%4;
+        if(!p2.checkCollision(p2.curBlock.x,p2.curBlock.y,p2.curBlock.type,nr)) p2.curBlock.rot=nr;
+    }
+    if(e.code==="ArrowLeft"){
+        if(!p2.checkCollision(p2.curBlock.x-1,p2.curBlock.y,p2.curBlock.type,p2.curBlock.rot)) p2.curBlock.x--;
+    }
+    if(e.code==="ArrowRight"){
+        if(!p2.checkCollision(p2.curBlock.x+1,p2.curBlock.y,p2.curBlock.type,p2.curBlock.rot)) p2.curBlock.x++;
+    }
+    if(e.code==="ArrowDown"){
+        if(!p2.checkCollision(p2.curBlock.x,p2.curBlock.y+1,p2.curBlock.type,p2.curBlock.rot)) p2.curBlock.y++;
+    }
+    if(e.code==="Enter"){
+        p2.hardDrop();
+    }
+})
+
+function loop(){
+    if(!p1.gameOver) p1.updateTick();
+    if(!p2.gameOver) p2.updateTick();
+    p1.draw();
+    p2.draw();
+
+    if(p1.gameOver || p2.gameOver){
+        setTimeout(()=>{
+            let resText;
+            if(p1.score > p2.score) resText = "左玩家获胜！";
+            else if(p2.score > p1.score) resText = "右玩家获胜！";
+            else resText = "平局！";
+            alert(`游戏结束！\n左玩家分数：${p1.score}\n右玩家分数：${p2.score}\n${resText}\n刷新页面重新开局`);
+        },100);
+    }
+}
+setInterval(loop,40);
+</script>
+</body>
+</html>

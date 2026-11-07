@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>贪吃蛇 双人对战</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Microsoft YaHei,sans-serif}
+body{background:#111;color:#fff;padding:20px;display:flex;flex-direction:column;align-items:center}
+#gameCanvas{background:#222;border:2px solid #888}
+#info{font-size:20px;margin-bottom:10px;height:30px}
+#tip{margin-top:8px;font-size:16px;color:#aaa}
+</style>
+</head>
+<body>
+<div id="info">请选择模式：1单人 / 2双人</div>
+<canvas id="gameCanvas"></canvas>
+<div id="tip">玩家一：WASD | 玩家二：方向键 | X退出游戏</div>
+
+<script>
+const WIDTH = 24;
+const HEIGHT = 18;
+const RAND_WALL_COUNT = 25;
+const BLOCK_SIZE = 24;
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+canvas.width = WIDTH * BLOCK_SIZE;
+canvas.height = HEIGHT * BLOCK_SIZE;
+const infoEl = document.getElementById("info");
+
+const eps = 1e-6;
+//蛇1
+let s1X = [], s1Y = [];
+let s1Len;
+let s1Dir; //0上 1右 2下 3左
+let s1Alive;
+//蛇2
+let s2X = [], s2Y = [];
+let s2Len;
+let s2Dir;
+let s2Alive;
+
+let wallMap = Array.from({length:WIDTH},()=>Array(HEIGHT).fill(false));
+let foodX, foodY;
+let gameOver = false;
+let score1 = 0, score2 = 0;
+let gameMode = 0; //0未选，1单人，2双人
+
+const keys = {};
+document.addEventListener("keydown",e=>{
+    keys[e.code]=true;
+    if(gameMode === 0){
+        if(e.code === "Digit1") gameMode=1;
+        if(e.code === "Digit2") gameMode=2;
+        return;
+    }
+    //玩家一 WASD
+    if(e.code === "KeyW" && s1Dir!==2) s1Dir=0;
+    if(e.code === "KeyS" && s1Dir!==0) s1Dir=2;
+    if(e.code === "KeyA" && s1Dir!==1) s1Dir=3;
+    if(e.code === "KeyD" && s1Dir!==3) s1Dir=1;
+    //玩家二方向键
+    if(gameMode===2){
+        if(e.code === "ArrowUp" && s2Dir!==2) s2Dir=0;
+        if(e.code === "ArrowDown" && s2Dir!==0) s2Dir=2;
+        if(e.code === "ArrowLeft" && s2Dir!==1) s2Dir=3;
+        if(e.code === "ArrowRight" && s2Dir!==3) s2Dir=1;
+    }
+    if(e.code === "KeyX") gameOver=true;
+});
+document.addEventListener("keyup",e=>keys[e.code]=false);
+
+// 修复：苹果不会刷在外墙、内墙
+function spawnFood(){
+    while(true){
+        foodX = Math.floor(Math.random()*WIDTH);
+        foodY = Math.floor(Math.random()*HEIGHT);
+        // 排除地图最外圈外墙
+        if(foodX <=0 || foodX >= WIDTH-1 || foodY <=0 || foodY >= HEIGHT-1) continue;
+        if(!wallMap[foodX][foodY]) break;
+    }
+}
+
+function generateRandomWall(){
+    for(let x=0;x<WIDTH;x++)
+        for(let y=0;y<HEIGHT;y++) wallMap[x][y]=false;
+    let cnt=0;
+    while(cnt<RAND_WALL_COUNT){
+        let rx = Math.floor(Math.random()*WIDTH);
+        let ry = Math.floor(Math.random()*HEIGHT);
+        let isSafe = !(rx >= WIDTH/2-4 && rx <= WIDTH/2+4 && ry >= HEIGHT/2-4 && ry <= HEIGHT/2+4);
+        if(!wallMap[rx][ry] && isSafe){
+            wallMap[rx][ry]=true;
+            cnt++;
+        }
+    }
+}
+
+function respawnSnake1(){
+    s1Len = 3;
+    s1X = [];
+    s1Y = [];
+    s1X[0] = Math.floor(WIDTH/2)-4;
+    s1Y[0] = Math.floor(HEIGHT/2);
+    s1X[1] = Math.floor(WIDTH/2)-5;
+    s1Y[1] = Math.floor(HEIGHT/2);
+    s1X[2] = Math.floor(WIDTH/2)-6;
+    s1Y[2] = Math.floor(HEIGHT/2);
+    s1Dir = 1;
+    s1Alive = true;
+}
+
+function respawnSnake2(){
+    s2Len = 3;
+    s2X = [];
+    s2Y = [];
+    s2X[0] = Math.floor(WIDTH/2)+4;
+    s2Y[0] = Math.floor(HEIGHT/2);
+    s2X[1] = Math.floor(WIDTH/2)+5;
+    s2Y[1] = Math.floor(HEIGHT/2);
+    s2X[2] = Math.floor(WIDTH/2)+6;
+    s2Y[2] = Math.floor(HEIGHT/2);
+    s2Dir = 3;
+    s2Alive = true;
+}
+
+function checkSnakeDie(headX,headY,sX,sY,len){
+    if(headX<0 || headX>=WIDTH || headY<0 || headY>=HEIGHT) return true;
+    if(wallMap[headX][headY]) return true;
+    for(let i=1;i<len;i++){
+        if(headX === sX[i] && headY === sY[i]) return true;
+    }
+    return false;
+}
+
+function logic(){
+    if(s1Alive){
+        let prevX = s1X[0];
+        let prevY = s1Y[0];
+        let nx = s1X[0];
+        let ny = s1Y[0];
+        nx += (s1Dir===1)?1:(s1Dir===3)?-1:0;
+        ny += (s1Dir===2)?1:(s1Dir===0)?-1:0;
+
+        if(gameMode===2 && s2Alive){
+            for(let i=0;i<s2Len;i++){
+                if(nx === s2X[i] && ny === s2Y[i]){
+                    s1Alive = false;
+                    score2++;
+                    setTimeout(()=>respawnSnake1(),400);
+                    return;
+                }
+            }
+        }
+        if(checkSnakeDie(nx,ny,s1X,s1Y,s1Len)){
+            if(gameMode===1){
+                gameOver=true;
+                return;
+            }else{
+                s1Alive=false;
+                score2++;
+                setTimeout(()=>respawnSnake1(),400);
+                return;
+            }
+        }
+        s1X[0]=nx; s1Y[0]=ny;
+        for(let i=1;i<s1Len;i++){
+            let tx = s1X[i];
+            let ty = s1Y[i];
+            s1X[i]=prevX;
+            s1Y[i]=prevY;
+            prevX=tx;
+            prevY=ty;
+        }
+        if(s1X[0]===foodX && s1Y[0]===foodY){
+            s1Len++;
+            s1X.push(0);
+            s1Y.push(0);
+            spawnFood();
+        }
+    }
+
+    if(gameMode===2 && s2Alive){
+        let prevX = s2X[0];
+        let prevY = s2Y[0];
+        let nx = s2X[0];
+        let ny = s2Y[0];
+        nx += (s2Dir===1)?1:(s2Dir===3)?-1:0;
+        ny += (s2Dir===2)?1:(s2Dir===0)?-1:0;
+
+        for(let i=0;i<s1Len;i++){
+            if(nx === s1X[i] && ny === s1Y[i]){
+                s2Alive=false;
+                score1++;
+                setTimeout(()=>respawnSnake2(),400);
+                return;
+            }
+        }
+        if(checkSnakeDie(nx,ny,s2X,s2Y,s2Len)){
+            s2Alive=false;
+            score1++;
+            setTimeout(()=>respawnSnake2(),400);
+            return;
+        }
+        s2X[0]=nx; s2Y[0]=ny;
+        for(let i=1;i<s2Len;i++){
+            let tx = s2X[i];
+            let ty = s2Y[i];
+            s2X[i]=prevX;
+            s2Y[i]=prevY;
+            prevX=tx;
+            prevY=ty;
+        }
+        if(s2X[0]===foodX && s2Y[0]===foodY){
+            s2Len++;
+            s2X.push(0);
+            s2Y.push(0);
+            spawnFood();
+        }
+    }
+}
+
+function draw(){
+    ctx.fillStyle="#222";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    //外墙
+    ctx.fillStyle="#888";
+    for(let x=0;x<WIDTH;x++){
+        ctx.fillRect(x*BLOCK_SIZE,0,BLOCK_SIZE-1,BLOCK_SIZE-1);
+        ctx.fillRect(x*BLOCK_SIZE,(HEIGHT-1)*BLOCK_SIZE,BLOCK_SIZE-1,BLOCK_SIZE-1);
+    }
+    for(let y=0;y<HEIGHT;y++){
+        ctx.fillRect(0,y*BLOCK_SIZE,BLOCK_SIZE-1,BLOCK_SIZE-1);
+        ctx.fillRect((WIDTH-1)*BLOCK_SIZE,y*BLOCK_SIZE,BLOCK_SIZE-1,BLOCK_SIZE-1);
+    }
+    //内墙
+    ctx.fillStyle="#777";
+    for(let x=0;x<WIDTH;x++){
+        for(let y=0;y<HEIGHT;y++){
+            if(wallMap[x][y]){
+                ctx.fillRect(x*BLOCK_SIZE,y*BLOCK_SIZE,BLOCK_SIZE-1,BLOCK_SIZE-1);
+            }
+        }
+    }
+    //食物
+    ctx.fillStyle="#f44";
+    ctx.beginPath();
+    ctx.arc(foodX*BLOCK_SIZE+BLOCK_SIZE/2, foodY*BLOCK_SIZE+BLOCK_SIZE/2, BLOCK_SIZE/2-3,0,Math.PI*2);
+    ctx.fill();
+
+    //蛇1
+    if(s1Alive){
+        for(let i=0;i<s1Len;i++){
+            if(i===0){
+                ctx.fillStyle = gameMode===1 ? "#3f3" : "#38f";
+            }else{
+                ctx.fillStyle = gameMode===1 ? "#0a0" : "#0066bb";
+            }
+            ctx.fillRect(s1X[i]*BLOCK_SIZE+1, s1Y[i]*BLOCK_SIZE+1, BLOCK_SIZE-3, BLOCK_SIZE-3);
+        }
+    }
+    //蛇2
+    if(gameMode===2 && s2Alive){
+        for(let i=0;i<s2Len;i++){
+            if(i===0) ctx.fillStyle="#f33";
+            else ctx.fillStyle="#900";
+            ctx.fillRect(s2X[i]*BLOCK_SIZE+1, s2Y[i]*BLOCK_SIZE+1, BLOCK_SIZE-3, BLOCK_SIZE-3);
+        }
+    }
+
+    //信息文字
+    if(gameMode===1){
+        infoEl.innerText = `得分:${s1Len}`;
+    }else if(gameMode===2){
+        infoEl.innerText = `玩家一分数：${score1} 玩家二分数：${score2}`;
+    }else{
+        infoEl.innerText = "请选择模式：1单人 / 2双人";
+    }
+}
+
+function initGame(){
+    generateRandomWall();
+    respawnSnake1();
+    score1=0;score2=0;
+    if(gameMode===2) respawnSnake2();
+    gameOver=false;
+    spawnFood();
+}
+
+function loop(){
+    if(gameMode!==0 && !gameOver){
+        logic();
+    }
+    draw();
+    if(gameOver){
+        infoEl.innerText="游戏结束！刷新页面重新开始";
+    }
+}
+
+//主循环
+let timer;
+function startGameLoop(){
+    timer = setInterval(()=>{
+        if(gameMode!==0 && !gameOver){
+            if(!s1X[0]) initGame();
+        }
+        loop();
+    },220);
+}
+startGameLoop();
+</script>
+</body>
+</html>

@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>人生模拟 小镇沙盒模拟器</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:"Microsoft YaHei",sans-serif}
+body{background:#111;color:#fff;padding:12px;display:flex;flex-direction:column;align-items:center}
+#gameCanvas{background:#222;border:2px solid #888}
+#info{margin-bottom:8px;font-size:16px;text-align:center;line-height:1.4}
+#msgBox{height:180px;width:620px;margin-top:8px;background:#1a1a1a;border:1px solid #555;padding:8px;overflow-y:auto;font-size:14px;color:#ddd}
+#tip{margin-top:6px;color:#aaa;text-align:center;font-size:14px}
+</style>
+</head>
+<body>
+<div id="info"></div>
+<canvas id="gameCanvas"></canvas>
+<div id="msgBox"></div>
+<div id="tip">
+WASD移动｜0创建NPC｜9建房｜1商店｜2结婚｜3离婚｜4删NPC｜S存档 L读档｜ESC退出
+</div>
+
+<script>
+const MAP_W = 31;
+const MAP_H = 16;
+const MAX_NPC = 12;
+const MAX_HOUSE = 8;
+const BOX_COUNT = 4;
+const BLOCK_SIZE = 20;
+
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+canvas.width = MAP_W * BLOCK_SIZE;
+canvas.height = MAP_H * BLOCK_SIZE;
+
+const talkLib = [
+    "今天天气不错",
+    "你要去哪里？",
+    "有空来我家坐坐",
+    "小心路上的箱子",
+    "好久不见！",
+    "要不要一起逛逛？",
+    "我准备回家休息了",
+    "这座地图好大呀",
+    "能帮我挪一下箱子吗？",
+    "等等我！",
+    "我刚出门散步",
+    "傍晚适合散步",
+    "我们一起玩吧！",
+    "别跑，追上你咯！",
+    "跟我四处走走吧"
+];
+const TALK_NUM = talkLib.length;
+
+class NPC{
+    constructor(){
+        this.name = "";
+        this.x = 0;
+        this.y = 0;
+        this.homeId = -1;
+        this.atHome = false;
+        this.nextAction = 0;
+        this.spouseId = -1;
+        this.canBaby = false;
+        this.sick = false;
+        //打工新增
+        this.isWorking = false;
+        this.workEndTime = 0;
+        this.workReward = 0;
+    }
+}
+class InteractInfo{
+    constructor(){
+        this.chasing = false;
+        this.stopTime = 0;
+    }
+}
+class House{
+    constructor(){
+        this.x = 0;
+        this.y = 0;
+        this.owner = "无";
+        this.exist = false;
+    }
+}
+
+let ground = Array.from({length:MAP_W},()=>Array(MAP_H).fill(0));
+let npc = [];
+let npcInteract = [];
+let house = [];
+let box = [[0,0],[0,0],[0,0],[0,0]];
+let npcCount = 0;
+let houseCount = 0;
+let px, py;
+let playerGold = 100;
+let msgBox = document.getElementById("msgBox");
+
+function addMsg(text){
+    msgBox.innerText += text + "\n";
+    msgBox.scrollTop = msgBox.scrollHeight;
+}
+function clearMsg(){
+    msgBox.innerText = "";
+}
+
+function findBox(x,y){
+    for(let i=0;i<BOX_COUNT;i++){
+        if(box[i][0]===x && box[i][1]===y) return i;
+    }
+    return -1;
+}
+function hasNpc(x,y){
+    for(let i=0;i<npcCount;i++){
+        if(npc[i].x===x && npc[i].y===y) return true;
+    }
+    return false;
+}
+function getNpcIndex(x,y){
+    for(let i=0;i<npcCount;i++){
+        if(npc[i].x===x && npc[i].y===y) return i;
+    }
+    return -1;
+}
+function isEmptyPos(x,y){
+    if(ground[x][y]===1) return false;
+    if(findBox(x,y)!==-1) return false;
+    return true;
+}
+function getSafePos(){
+    while(true){
+        let tx = Math.floor(Math.random()*(MAP_W-2))+2;
+        let ty = Math.floor(Math.random()*(MAP_H-2))+2;
+        if(isEmptyPos(tx,ty) && !hasNpc(tx,ty) && !(tx===px && ty===py)){
+            return [tx,ty];
+        }
+    }
+}
+function getDist(x1,y1,x2,y2){
+    return Math.abs(x1-x2)+Math.abs(y1-y2);
+}
+
+function moveEntity(isPlayer, npcId, cxRef, cyRef, nx, ny){
+    if(ground[nx][ny]===1) return false;
+    const bid = findBox(nx,ny);
+    if(bid!==-1){
+        const bx2 = nx + (nx - cxRef[0]);
+        const by2 = ny + (ny - cyRef[0]);
+        if(!isEmptyPos(bx2,by2) || hasNpc(bx2,by2)) return false;
+        box[bid][0]=bx2;
+        box[bid][1]=by2;
+        cxRef[0]=nx; cyRef[0]=ny;
+        return true;
+    }
+    const tarIdx = getNpcIndex(nx,ny);
+    if(tarIdx!==-1){
+        const tx = nx + (nx - cxRef[0]);
+        const ty = ny + (ny - cyRef[0]);
+        if(isEmptyPos(tx,ty) && !hasNpc(tx,ty) && !(tx===px && ty===py)){
+            npc[tarIdx].x = tx;
+            npc[tarIdx].y = ty;
+            cxRef[0]=nx; cyRef[0]=ny;
+            return true;
+        }
+        return false;
+    }
+    if(!hasNpc(nx,ny)){
+        cxRef[0]=nx; cyRef[0]=ny;
+        return true;
+    }
+    return false;
+}
+function moveToTarget(cxRef, cyRef, tx, ty){
+    let nx = cxRef[0], ny = cyRef[0];
+    if(cxRef[0]<tx) nx++;
+    else if(cxRef[0]>tx) nx--;
+    else if(cyRef[0]<ty) ny++;
+    else if(cyRef[0]>ty) ny--;
+    return moveEntity(false, -1, cxRef, cyRef, nx, ny);
+}
+
+//商店
+function shopUI(){
+    let op = prompt(`===========小镇商店===========
+你的金币：${playerGold}
+1=购买房屋(60金币)
+2=购买食物(15金币) 开启已婚NPC生育
+3=购买药品(25金币) 治愈全部生病NPC
+输入0退出
+请输入选择：`);
+    if(op==="1"){
+        if(playerGold>=60 && houseCount<MAX_HOUSE){
+            playerGold -=60;
+            let [tx,ty] = getSafePos();
+            let h = new House();
+            h.x=tx;h.y=ty;h.owner="无";h.exist=true;
+            house[houseCount]=h;
+            houseCount++;
+            addMsg("购买房屋成功！");
+        }else addMsg("金币不足或者房子已满！");
+    }else if(op==="2"){
+        if(playerGold>=15){
+            playerGold -=15;
+            for(let i=0;i<npcCount;i++){
+                if(npc[i].spouseId!==-1 && !npc[i].sick){
+                    npc[i].canBaby = true;
+                }
+            }
+            addMsg("购买食物！已婚健康NPC获得生育机会！");
+        }else addMsg("金币不足！");
+    }else if(op==="3"){
+        if(playerGold>=25){
+            playerGold -=25;
+            for(let i=0;i<npcCount;i++) npc[i].sick=false;
+            addMsg("药品生效，所有NPC病好了！");
+        }else addMsg("金币不足！");
+    }
+}
+//结婚
+function marrySystem(){
+    let listStr = "========NPC结婚系统========\n现有NPC列表：\n";
+    for(let i=0;i<npcCount;i++){
+        listStr += `${i}：${npc[i].name} ${npc[i].spouseId!==-1?"已结婚":"单身"} ${npc[i].sick?"[生病]":""}\n`;
+    }
+    let aStr = prompt(listStr+"\n输入第一个NPC编号：");
+    let bStr = prompt("输入第二个NPC编号：");
+    let a = parseInt(aStr), b=parseInt(bStr);
+    if(isNaN(a)||isNaN(b)||a<0||b<0||a>=npcCount||b>=npcCount||a===b){
+        addMsg("无效编号！");return;
+    }
+    if(npc[a].spouseId!==-1 || npc[b].spouseId!==-1){
+        addMsg("其中一方已经结婚！");return;
+    }
+    if(playerGold<40){
+        addMsg("金币不足！结婚需要40金币");return;
+    }
+    playerGold -=40;
+    npc[a].spouseId = b;
+    npc[b].spouseId = a;
+    npc[a].canBaby = false;
+    npc[b].canBaby = false;
+    addMsg(`${npc[a].name} 和 ${npc[b].name} 结婚成功！`);
+}
+//离婚
+function divorceSystem(){
+    let listStr = "==== NPC离婚系统 ====\n";
+    for(let i=0;i<npcCount;i++){
+        listStr += `${i}：${npc[i].name} ${npc[i].spouseId!==-1?"已婚":"单身"}\n`;
+    }
+    let idStr = prompt(listStr+"\n输入要离婚NPC编号：");
+    let id = parseInt(idStr);
+    if(isNaN(id)||id<0||id>=npcCount||npc[id].spouseId===-1){
+        addMsg("该NPC没有配偶！");return;
+    }
+    let sp = npc[id].spouseId;
+    npc[id].spouseId = -1;
+    npc[sp].spouseId = -1;
+    npc[id].canBaby = false;
+    npc[sp].canBaby = false;
+    addMsg(`${npc[id].name}与${npc[sp].name}离婚完成！`);
+}
+//删除NPC
+function delNpcUi(){
+    let listStr = "==== 删除NPC ====\n";
+    for(let i=0;i<npcCount;i++){
+        listStr += `${i}：${npc[i].name} ${npc[i].spouseId!==-1?"已婚":""} ${npc[i].sick?"[生病]":""} ${npc[i].isWorking?"【打工中】":""}\n`;
+    }
+    let delIdStr = prompt(listStr+"\n输入要删除NPC编号：");
+    let delId = parseInt(delIdStr);
+    if(isNaN(delId)||delId<0||delId>=npcCount){
+        addMsg("编号无效");return;
+    }
+    if(npc[delId].spouseId!==-1){
+        let sp = npc[delId].spouseId;
+        npc[sp].spouseId = -1;
+        npc[sp].canBaby = false;
+    }
+    for(let i=delId;i<npcCount-1;i++){
+        npc[i]=npc[i+1];
+        npcInteract[i]=npcInteract[i+1];
+    }
+    npcCount--;
+    addMsg("NPC已删除！");
+}
+
+function tryBaby(parentA, parentB){
+    if(npcCount>=MAX_NPC) return;
+    if(npc[parentA].sick || npc[parentB].sick) return;
+    if(!npc[parentA].canBaby && !npc[parentB].canBaby) return;
+    if(Math.random()*100>45) return;
+    let [tx,ty] = getSafePos();
+    let child = new NPC();
+    child.name = String.fromCharCode(65+Math.floor(Math.random()*26));
+    child.x=tx; child.y=ty;
+    child.homeId = npc[parentA].homeId;
+    child.atHome = false;
+    child.nextAction = Date.now()+1200;
+    child.spouseId = -1;
+    child.canBaby = false;
+    child.sick = false;
+    child.isWorking = false;
+    child.workEndTime = 0;
+    child.workReward = 0;
+    npc[npcCount]=child;
+    npcInteract[npcCount] = new InteractInfo();
+    npcCount++;
+    npc[parentA].canBaby = false;
+    npc[parentB].canBaby = false;
+    addMsg(`新宝宝【${child.name}】出生啦！`);
+}
+
+function npcAI(){
+    const now = Date.now();
+    for(let i=0;i<npcCount;i++){
+        const p = npc[i];
+        const info = npcInteract[i];
+
+        // =====打工结算逻辑=====
+        if(p.isWorking){
+            if(now >= p.workEndTime){
+                //打工结束，金币给玩家
+                playerGold += p.workReward;
+                addMsg(`${p.name}打工回来了！赚到 ${p.workReward} 金币！`);
+                p.isWorking = false;
+                p.workReward = 0;
+            }
+            continue; //打工期间不做别的AI行为
+        }
+
+        const sleepTick = p.sick ? (Math.random()*2000+1000) : (Math.random()*1000+500);
+        if(now < p.nextAction) continue;
+
+        if(!p.sick && Math.random()*220<1){
+            p.sick = true;
+            addMsg(`${p.name}：我生病了呜呜呜`);
+        }
+        if(p.spouseId!==-1 && p.spouseId>i){
+            tryBaby(i,p.spouseId);
+        }
+        if(info.chasing && now>info.stopTime){
+            info.chasing = false;
+        }
+        const dist = getDist(p.x,p.y,px,py);
+        if(!info.chasing && dist<=6 && Math.random()*100<35 && !p.sick){
+            info.chasing = true;
+            info.stopTime = now+6000;
+        }
+        if(info.chasing){
+            let cr = [p.x], cy = [p.y];
+            moveToTarget(cr, cy, px, py);
+            p.x=cr[0];p.y=cy[0];
+            if(dist===1){
+                addMsg(`${p.name}：来一起玩呀！`);
+            }
+        }else{
+            const act = Math.random()*100;
+            //健康NPC有概率选择外出打工
+            if(!p.sick && act < 18){
+                p.isWorking = true;
+                const earn = Math.floor(Math.random()*12)+6; //6~17金币
+                p.workReward = earn;
+                p.workEndTime = now + 6500; //打工持续6.5秒
+                addMsg(`${p.name}出门打工去了，预计带回${earn}金币`);
+            }
+            else if(p.homeId!==-1 && !p.atHome && act<25){
+                const h = house[p.homeId];
+                let cr=[p.x], cy=[p.y];
+                moveEntity(false,i,cr,cy,h.x,h.y);
+                p.x=cr[0];p.y=cy[0];
+                if(p.x===h.x && p.y===h.y) p.atHome=true;
+            }else if(p.homeId!==-1 && p.atHome && act<25){
+                let [tx,ty] = getSafePos();
+                let cr=[p.x], cy=[p.y];
+                moveEntity(false,i,cr,cy,tx,ty);
+                p.x=cr[0];p.y=cy[0];
+                p.atHome=false;
+            }else{
+                const dir = Math.floor(Math.random()*4);
+                let nx = p.x, ny = p.y;
+                if(dir===0) ny--;
+                else if(dir===1) ny++;
+                else if(dir===2) nx--;
+                else nx++;
+                let cr=[p.x], cy=[p.y];
+                moveEntity(false,i,cr,cy,nx,ny);
+                p.x=cr[0];p.y=cy[0];
+            }
+            if(Math.random()*5<1){
+                if(p.sick) addMsg(`${p.name}：身体好难受......`);
+                else addMsg(`${p.name}：${talkLib[Math.floor(Math.random()*TALK_NUM)]}`);
+            }
+        }
+        p.nextAction = now + sleepTick;
+    }
+}
+
+function initMap(){
+    for(let y=1;y<MAP_H;y++){
+        for(let x=1;x<MAP_W;x++){
+            if(y===1 || y===MAP_H-1 || x===1 || x===MAP_W-1) ground[x][y]=1;
+            else ground[x][y]=0;
+        }
+    }
+    px=5; py=3;
+    box[0]=[12,5];
+    box[1]=[18,5];
+    box[2]=[12,10];
+    box[3]=[18,10];
+    playerGold=100;
+    npc=[];npcInteract=[];house=[];
+    npcCount=0;houseCount=0;
+    clearMsg();
+}
+
+function draw(){
+    ctx.fillStyle="#111";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    for(let y=1;y<MAP_H;y++){
+        for(let x=1;x<MAP_W;x++){
+            if(x===px && y===py){
+                ctx.fillStyle="#44aaff";
+                ctx.fillRect(x*BLOCK_SIZE+1,y*BLOCK_SIZE+1,BLOCK_SIZE-2,BLOCK_SIZE-2);
+                continue;
+            }
+            let drawn = false;
+            for(let i=0;i<npcCount;i++){
+                if(npc[i].x===x && npc[i].y===y){
+                    if(npc[i].isWorking){
+                        ctx.fillStyle="#88ddff"; //打工NPC浅蓝色
+                    }else if(npc[i].sick){
+                        ctx.fillStyle="#dd4444"; //生病红色
+                    }else{
+                        ctx.fillStyle="#ffdd44"; //普通黄色
+                    }
+                    ctx.fillRect(x*BLOCK_SIZE+1,y*BLOCK_SIZE+1,BLOCK_SIZE-2,BLOCK_SIZE-2);
+                    drawn=true;break;
+                }
+            }
+            if(drawn) continue;
+            for(let i=0;i<houseCount;i++){
+                if(house[i].x===x && house[i].y===y){
+                    ctx.fillStyle="#22bb44";
+                    ctx.fillRect(x*BLOCK_SIZE+1,y*BLOCK_SIZE+1,BLOCK_SIZE-2,BLOCK_SIZE-2);
+                    drawn=true;break;
+                }
+            }
+            if(drawn) continue;
+            let bid = findBox(x,y);
+            if(bid!==-1){
+                ctx.fillStyle="#ffaa22";
+                ctx.fillRect(x*BLOCK_SIZE+1,y*BLOCK_SIZE+1,BLOCK_SIZE-2,BLOCK_SIZE-2);
+                continue;
+            }
+            if(ground[x][y]===1){
+                ctx.fillStyle="#777777";
+                ctx.fillRect(x*BLOCK_SIZE+1,y*BLOCK_SIZE+1,BLOCK_SIZE-2,BLOCK_SIZE-2);
+            }
+        }
+    }
+    document.getElementById("info").innerText = `===== 人生模拟小游戏｜金币:${playerGold} =====`;
+}
+
+function createNpc(){
+    if(npcCount>=MAX_NPC){
+        addMsg("人数上限！无法继续捏人");return;
+    }
+    let nm = prompt("输入人物名字（一个字）：");
+    if(!nm || nm.length<1 || nm.length>2){
+        addMsg("必须单个汉字！");return;
+    }
+    let [tx,ty] = getSafePos();
+    let newNpc = new NPC();
+    newNpc.name = nm;
+    newNpc.x=tx;newNpc.y=ty;
+    newNpc.homeId=-1; newNpc.atHome=false;
+    newNpc.nextAction = Date.now()+1000;
+    newNpc.spouseId=-1; newNpc.canBaby=false; newNpc.sick=false;
+    newNpc.isWorking = false;
+    newNpc.workEndTime = 0;
+    newNpc.workReward = 0;
+    npc[npcCount] = newNpc;
+    npcInteract[npcCount] = new InteractInfo();
+    npcCount++;
+    addMsg(`成功捏出人物【${nm}】！`);
+}
+function buildHouse(){
+    if(houseCount>=MAX_HOUSE){
+        addMsg("房子数量上限！");return;
+    }
+    let ownerIdStr = prompt("输入房主NPC编号：");
+    let ownerId = parseInt(ownerIdStr);
+    let [tx,ty] = getSafePos();
+    let h = new House();
+    h.x=tx;h.y=ty;
+    if(!isNaN(ownerId) && ownerId>=0 && ownerId<npcCount){
+        h.owner = npc[ownerId].name;
+        npc[ownerId].homeId = houseCount;
+    }else{
+        h.owner = "无";
+    }
+    h.exist=true;
+    house[houseCount]=h;
+    houseCount++;
+    addMsg("建造房屋成功！");
+}
+
+//存档读档（浏览器localStorage代替文件）
+function saveGame(){
+    const saveData = {
+        px,py,playerGold,box,npcCount,npc,houseCount,house,ground
+    };
+    localStorage.setItem("lifeSimSave", JSON.stringify(saveData));
+    addMsg("存档成功！");
+}
+function loadGame(){
+    let s = localStorage.getItem("lifeSimSave");
+    if(!s){
+        addMsg("无存档文件！");return;
+    }
+    let d = JSON.parse(s);
+    px=d.px; py=d.py; playerGold=d.playerGold;
+    box=d.box; npcCount=d.npcCount;
+    npc = d.npc;
+    houseCount=d.houseCount; house=d.house; ground=d.ground;
+    for(let i=0;i<npcCount;i++) npcInteract[i] = new InteractInfo();
+    addMsg("读档成功！");
+}
+
+document.addEventListener("keydown",e=>{
+    const pxRef = [px];
+    const pyRef = [py];
+    if(e.code==="KeyW") moveEntity(true,-1,pxRef,pyRef,px,py-1);
+    if(e.code==="KeyS") moveEntity(true,-1,pxRef,pyRef,px,py+1);
+    if(e.code==="KeyA") moveEntity(true,-1,pxRef,pyRef,px-1,py);
+    if(e.code==="KeyD") moveEntity(true,-1,pxRef,pyRef,px+1,py);
+    px=pxRef[0]; py=pyRef[0];
+
+    if(e.code==="Digit0") createNpc();
+    if(e.code==="Digit9") buildHouse();
+    if(e.code==="Digit1") shopUI();
+    if(e.code==="Digit2") marrySystem();
+    if(e.code==="Digit3") divorceSystem();
+    if(e.code==="Digit4") delNpcUi();
+    if(e.code==="KeyS") saveGame();
+    if(e.code==="KeyL") loadGame();
+    if(e.code==="Escape"){
+        alert("游戏结束，刷新页面重新开局");
+    }
+});
+
+function loop(){
+    npcAI();
+    draw();
+}
+initMap();
+setInterval(loop,50);
+</script>
+</body>
+</html>

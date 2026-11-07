@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>马里奥游戏</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;overflow:hidden;font-family:Arial}
+canvas{display:block;margin:0 auto;}
+#loginPanel{
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);
+    display:flex;align-items:center;justify-content:center;
+    z-index:999;
+}
+.login-box{
+    background:#fff;padding:30px;border-radius:12px;text-align:center;
+    border:4px solid #333;
+}
+#shopPanel{
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.85);
+    display:none;align-items:center;justify-content:center;
+    z-index:998;
+}
+.shop-box{
+    background:#fff;padding:30px;border-radius:12px;text-align:center;min-width:320px;border:4px solid #333;
+}
+input{padding:8px;font-size:18px;width:220px;margin:8px 0;display:block;margin-left:auto;margin-right:auto}
+button{padding:8px 16px;font-size:16px;cursor:pointer;margin:4px}
+.delBtn{background:#ff4444;color:white;border:none;}
+.buyBtn{background:#28a745;color:white;border:none;}
+.closeBtn{background:#444;color:white;border:none;}
+</style>
+</head>
+<body>
+<div id="loginPanel">
+    <div class="login-box">
+        <h2>马里奥游戏登录</h2>
+        <input id="usernameInput" placeholder="账号">
+        <input id="pwdInput" type="password" placeholder="密码">
+        <br>
+        <button onclick="login()">登录 / 注册</button>
+        <br>
+        <button class="delBtn" onclick="deleteAccount()">删除此账号</button>
+    </div>
+</div>
+<div id="shopPanel">
+    <div class="shop-box">
+        <h2>🏪 道具商店</h2>
+        <p>你的金币：<span id="shopCoinText">0</span></p>
+        <hr>
+        <p>二段跳（30金币）<button class="buyBtn" onclick="buyItem('doubleJump')">购买</button></p>
+        <p>轻落（慢速下落，50金币）<button class="buyBtn" onclick="buyItem('slowFall')">购买</button></p>
+        <p>加速（移动更快，40金币）<button class="buyBtn" onclick="buyItem('speedUp')">购买</button></p>
+        <hr>
+        <button class="closeBtn" onclick="closeShop()">关闭商店(S)</button>
+    </div>
+</div>
+<canvas id="game"></canvas>
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const loginPanel = document.getElementById("loginPanel");
+const shopPanel = document.getElementById("shopPanel");
+const shopCoinText = document.getElementById("shopCoinText");
+let isLogin = false;
+function resizeCanvas(){
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+resizeCanvas();
+window.addEventListener("resize",resizeCanvas);
+// ========= 账号存档 =========
+let currentUser = "";
+let currentLevel = 1;
+let coinTotal = 0;
+// 新增 speedUp
+let ownedItems = {doubleJump:false, slowFall:false, speedUp:false};
+function getAllUserData(){
+    const raw = localStorage.getItem("marioAllUsers");
+    return raw ? JSON.parse(raw) : {};
+}
+function saveUserData(userName, pwd, lv, coins, items){
+    const users = getAllUserData();
+    users[userName] = {pwd:pwd, level:lv, coins:coins, items:items};
+    localStorage.setItem("marioAllUsers", JSON.stringify(users));
+}
+function deleteAccount(){
+    const name = document.getElementById("usernameInput").value.trim();
+    const pwd = document.getElementById("pwdInput").value;
+    if(!name || !pwd){alert("请输入账号和密码！");return;}
+    const users = getAllUserData();
+    if(!users[name]){alert("账号不存在");return;}
+    if(users[name].pwd !== pwd){alert("密码错误");return;}
+    if(confirm(`确定删除账号【${name}】？金币、关卡、道具全部清空！`)){
+        delete users[name];
+        localStorage.setItem("marioAllUsers", JSON.stringify(users));
+        alert("账号删除成功");
+    }
+}
+function login(){
+    const name = document.getElementById("usernameInput").value.trim();
+    const pwd = document.getElementById("pwdInput").value;
+    if(!name || !pwd){alert("账号密码不能为空");return;}
+    const users = getAllUserData();
+    if(users[name]){
+        if(users[name].pwd !== pwd){alert("密码错误！");return;}
+        currentUser = name;
+        currentLevel = users[name].level;
+        coinTotal = users[name].coins;
+        ownedItems = users[name].items;
+    }else{
+        currentUser = name;
+        currentLevel = 1;
+        coinTotal = 0;
+        ownedItems = {doubleJump:false, slowFall:false, speedUp:false};
+        saveUserData(currentUser, pwd, currentLevel, coinTotal, ownedItems);
+        alert("注册成功！");
+    }
+    loginPanel.style.display = "none";
+    isLogin = true;
+    loadLevel(currentLevel);
+}
+// ========= 商店 =========
+function openShop(){
+    shopCoinText.innerText = coinTotal;
+    shopPanel.style.display = "flex";
+}
+function closeShop(){
+    shopPanel.style.display = "none";
+}
+function buyItem(itemKey){
+    const price = {doubleJump:30, slowFall:50, speedUp:40};
+    if(ownedItems[itemKey]){
+        alert("你已经拥有这个道具！");
+        return;
+    }
+    if(coinTotal >= price[itemKey]){
+        coinTotal -= price[itemKey];
+        ownedItems[itemKey] = true;
+        const users = getAllUserData();
+        users[currentUser].coins = coinTotal;
+        users[currentUser].items = ownedItems;
+        localStorage.setItem("marioAllUsers", JSON.stringify(users));
+        shopCoinText.innerText = coinTotal;
+        alert("购买成功！");
+    }else{
+        alert("金币不足！");
+    }
+}
+// ========= 图片路径！！ static文件夹里的mario.png =========
+const marioImg = new Image();
+marioImg.src = "static/mario.png";
+marioImg.onload = ()=>{
+    console.log("✅ mario.png 图片加载成功");
+}
+marioImg.onerror = ()=>{
+    console.log("❌ 找不到 mario.png，将显示红色方块");
+}
+// ========= 玩家 =========
+let px = 50;
+let py = 300;
+let vx = 0;
+let vy = 0;
+const speedNormal = 4;
+const speedBoost = 6;
+const gravityNormal = 0.5;
+const gravitySlow = 0.22;
+const jumpPower = -12;
+let onGround = false;
+let jumpCount = 0;
+const maxJumpCount = 2;
+let platforms = [];
+let flag = {};
+let coins = [];
+function generateLevel(lvNum){
+    const plats = [];
+    plats.push({x:0, y:canvas.height - 60, w:canvas.width, h:60});
+    const platformCount = 4 + Math.floor(lvNum / 2);
+    let lastX = 80;
+    let lastY = canvas.height - 120;
+    coins = [];
+    for(let i=0; i<platformCount; i++){
+        const w = 70 + Math.random() * 80;
+        const dx = 120;
+        const dy = - (40 + Math.random() * 70);
+        lastX += dx;
+        lastY += dy;
+        if(lastX + w > canvas.width - 100) break;
+        if(lastY < 100) lastY = 100;
+        plats.push({x:lastX,y:lastY,w:w,h:20});
+        const coinNum = Math.floor(Math.random()*2)+1;
+        for(let c=0;c<coinNum;c++){
+            coins.push({
+                x: lastX + 15 + c*30,
+                y: lastY - 30,
+                r:10,
+                collected:false
+            })
+        }
+    }
+    const lastPlat = plats[plats.length - 1];
+    flag = {x: lastPlat.x + lastPlat.w - 16, y: lastPlat.y - 180, w:16, h:180};
+    return plats;
+}
+function loadLevel(lvNum){
+    platforms = generateLevel(lvNum);
+    px = 50;
+    py = canvas.height - 120;
+    vx = 0;
+    vy = 0;
+    onGround = false;
+    jumpCount = 0;
+    const users = getAllUserData();
+    users[currentUser].level = lvNum;
+    localStorage.setItem("marioAllUsers", JSON.stringify(users));
+}
+// 按键
+const keys = {};
+document.addEventListener("keydown",e=>{
+    keys[e.code]=true;
+    if(e.code==="KeyW"){
+        if(onGround){
+            vy = jumpPower;
+            onGround = false;
+            jumpCount = 1;
+        }else if(ownedItems.doubleJump && jumpCount < maxJumpCount){
+            vy = jumpPower;
+            jumpCount = 2;
+        }
+    }
+    if(e.code === "KeyF"){
+        if(document.fullscreenElement) document.exitFullscreen();
+        else document.documentElement.requestFullscreen();
+    }
+    if(e.code === "KeyR"){
+        loadLevel(currentLevel);
+    }
+    if(e.code === "KeyL"){
+        loginPanel.style.display = "flex";
+        isLogin = false;
+    }
+    if(e.code === "KeyS"){
+        if(shopPanel.style.display === "flex") closeShop();
+        else openShop();
+    }
+    // ====== 新增 E 键：刷新地形 ======
+    if(e.code === "KeyE"){
+        if(isLogin){
+            loadLevel(currentLevel);
+        }
+    }
+});
+document.addEventListener("keyup",e=>keys[e.code]=false);
+//碰撞
+function rectCollision(a,b){
+    return a.x < b.x+b.w && a.x+a.w> b.x && a.y < b.y+b.h && a.y+a.h> b.y;
+}
+function circleRectCollision(circle, rect){
+    const cx = circle.x, cy = circle.y, r = circle.r;
+    const rx = rect.x, ry = rect.y, rw = rect.w, rh = rect.h;
+    let testX = cx;
+    let testY = cy;
+    if(cx < rx) testX = rx;
+    else if(cx > rx+rw) testX = rx+rw;
+    if(cy < ry) testY = ry;
+    else if(cy > ry+rh) testY = ry+rh;
+    const dx = cx - testX;
+    const dy = cy - testY;
+    return (dx*dx + dy*dy) < r*r;
+}
+function loop(){
+    ctx.fillStyle="#64b4ff";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    if(isLogin){
+        const gravity = ownedItems.slowFall ? gravitySlow : gravityNormal;
+        // 判断是否拥有加速道具
+        const speed = ownedItems.speedUp ? speedBoost : speedNormal;
+        vx = 0;
+        if(keys["KeyA"]) vx = -speed;
+        if(keys["KeyD"]) vx = speed;
+        vy += gravity;
+        px += vx;
+        py += vy;
+        const playerBox = {x:px-16,y:py-16,w:32,h:32};
+        onGround = false;
+        for(let p of platforms){
+            if(rectCollision(playerBox,p)){
+                if(vy>0 && py -16 +32 - vy <= p.y){
+                    py = p.y -16;
+                    vy = 0;
+                    onGround = true;
+                    jumpCount = 0;
+                }
+            }
+        }
+        for(let coin of coins){
+            if(!coin.collected && circleRectCollision(coin, playerBox)){
+                coin.collected = true;
+                coinTotal +=1;
+                const users = getAllUserData();
+                users[currentUser].coins = coinTotal;
+                localStorage.setItem("marioAllUsers", JSON.stringify(users));
+            }
+        }
+        if(py > canvas.height + 50){
+            loadLevel(currentLevel);
+        }
+        if(px<16) px=16;
+        if(px>canvas.width-16) px=canvas.width-16;
+        if(rectCollision(playerBox,flag)){
+            currentLevel +=1;
+            loadLevel(currentLevel);
+        }
+        //绘制平台
+        ctx.fillStyle="#8b4513";
+        for(let p of platforms) ctx.fillRect(p.x,p.y,p.w,p.h);
+        //旗杆
+        ctx.fillStyle="#777777";
+        ctx.fillRect(flag.x,flag.y,flag.w,flag.h);
+        ctx.fillStyle="#ff2222";
+        ctx.beginPath();
+        ctx.moveTo(flag.x+flag.w, flag.y);
+        ctx.lineTo(flag.x+80, flag.y+40);
+        ctx.lineTo(flag.x+flag.w, flag.y+80);
+        ctx.fill();
+        //金币
+        for(let coin of coins){
+            if(!coin.collected){
+                ctx.beginPath();
+                ctx.arc(coin.x,coin.y,coin.r,0,Math.PI*2);
+                ctx.fillStyle="#ffd700";
+                ctx.fill();
+                ctx.strokeStyle="#ffaa00";
+                ctx.stroke();
+            }
+        }
+        //绘制本地 mario.png，找不到就红色方块
+        if(marioImg.complete && marioImg.naturalWidth>0){
+            ctx.drawImage(marioImg, px - 16, py - 16, 32, 32);
+        }else{
+            ctx.fillStyle="red";
+            ctx.fillRect(px-16,py-16,32,32);
+        }
+        //UI文字（加上E提示）
+        ctx.fillStyle="#fff";
+        ctx.font="24px Arial";
+        ctx.textAlign="left";
+        ctx.fillText(`账号:${currentUser}`,20,35);
+        ctx.fillText(`关卡:${currentLevel}`,20,65);
+        ctx.fillText(`💰金币:${coinTotal}`,20,95);
+        ctx.fillText(`[S]商店 [L]返回登录 [E]刷新地形`,20,125);
+    }
+    requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
